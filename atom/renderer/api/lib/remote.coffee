@@ -30,6 +30,7 @@ metaToValue = (meta) ->
   switch meta.type
     when 'value' then meta.value
     when 'array' then (metaToValue(el) for el in meta.members)
+    when 'buffer' then new Buffer(meta.value)
     when 'error'
       throw new Error("#{meta.message}\n#{meta.stack}")
     else
