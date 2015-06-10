@@ -8,7 +8,12 @@ ipc.send = (args...) ->
   binding.send 'ipc-message', [args...]
 
 ipc.sendSync = (args...) ->
-  JSON.parse binding.sendSync('ipc-message-sync', [args...])
+  ipc.sendSyncFull(args...).value
+
+ipc.sendSyncFull = (args...) ->
+  result = binding.sendSync('ipc-message-sync', [args...])
+  throw new Error result.error if result.error
+  result
 
 ipc.sendToHost = (args...) ->
   binding.send 'ipc-message-host', [args...]

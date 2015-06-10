@@ -4,10 +4,16 @@
 
 #include "atom/browser/api/event.h"
 
+#include <vector>
+
 #include "atom/common/api/api_messages.h"
 #include "atom/common/native_mate_converters/string16_converter.h"
+#include "base/threading/thread_restrictions.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "native_mate/object_template_builder.h"
+
+#include "atom/common/node_includes.h"
 
 namespace mate {
 
@@ -18,8 +24,8 @@ v8::Persistent<v8::ObjectTemplate> template_;
 }  // namespace
 
 Event::Event()
-    : sender_(NULL),
-      message_(NULL) {
+    : sender_(nullptr),
+      message_(nullptr) {
 }
 
 Event::~Event() {
@@ -47,8 +53,8 @@ void Event::SetSenderAndMessage(content::WebContents* sender,
 }
 
 void Event::WebContentsDestroyed() {
-  sender_ = NULL;
-  message_ = NULL;
+  sender_ = nullptr;
+  message_ = nullptr;
 }
 
 void Event::PreventDefault(v8::Isolate* isolate) {
@@ -56,11 +62,41 @@ void Event::PreventDefault(v8::Isolate* isolate) {
                            v8::True(isolate));
 }
 
-bool Event::SendReply(const base::string16& json) {
-  if (message_ == NULL || sender_ == NULL)
+bool Event::SendReply(const base::string16& json, mate::Arguments* args) {
+  if (!message_ || !sender_)
     return false;
 
-  AtomViewHostMsg_Message_Sync::WriteReplyParams(message_, json);
+  SyncMessageReply reply = { json };
+  std::vector<v8::Local<v8::Value>> buffers;
+  if (args->GetNext(&buffers)) {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    reply.handles.reserve(buffers.size());
+    reply.sizes.reserve(buffers.size());
+
+    // Converting Buffer to SharedMemory.
+    for (v8::Local<v8::Value> buffer : buffers) {
+      if (node::Buffer::HasInstance(buffer)) {
+        base::SharedMemory memory;
+        size_t size = node::Buffer::Length(buffer);
+        if (memory.CreateAndMapAnonymous(size)) {
+          memcpy(memory.memory(), node::Buffer::Data(buffer), size);
+          auto process = sender_->GetRenderProcessHost()->GetHandle();
+          auto handle = base::SharedMemory::NULLHandle();
+          if (memory.GiveToProcess(process, &handle)) {
+            reply.handles.push_back(handle);
+            reply.sizes.push_back(size);
+            continue;
+          }
+        }
+      }
+
+      // Push back NULLHandle as fallback.
+      reply.handles.push_back(base::SharedMemory::NULLHandle());
+      reply.sizes.push_back(0);
+    }
+  }
+
+  AtomViewHostMsg_Message_Sync::WriteReplyParams(message_, reply);
   return sender_->Send(message_);
 }
 

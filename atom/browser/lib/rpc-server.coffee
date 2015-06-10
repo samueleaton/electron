@@ -4,7 +4,7 @@ objectsRegistry = require './objects-registry.js'
 v8Util = process.atomBinding 'v8_util'
 
 # Convert a real value into meta data.
-valueToMeta = (sender, value) ->
+valueToMeta = (sender, value, buffers) ->
   meta = type: typeof value
 
   meta.type = 'buffer' if Buffer.isBuffer value
@@ -16,7 +16,7 @@ valueToMeta = (sender, value) ->
 
   if meta.type is 'array'
     meta.members = []
-    meta.members.push valueToMeta(sender, el) for el in value
+    meta.members.push valueToMeta(sender, el, buffers) for el in value
   else if meta.type is 'object' or meta.type is 'function'
     meta.name = value.constructor.name
 
@@ -27,8 +27,9 @@ valueToMeta = (sender, value) ->
 
     meta.members = []
     meta.members.push {name: prop, type: typeof field} for prop, field of value
-  else if meta.type is 'buffer'
-    meta.value = Array::slice.call value, 0
+  else if meta.type is 'buffer' and buffers?
+    meta.index = buffers.length
+    buffers.push value
   else
     meta.type = 'value'
     meta.value = value
@@ -38,6 +39,11 @@ valueToMeta = (sender, value) ->
 # Convert Error into meta data.
 errorToMeta = (error) ->
   type: 'error', message: error.message, stack: (error.stack || error)
+
+# Convert value into format of returnValue.
+toReturnValue = (sender, value) ->
+  buffers = []
+  [valueToMeta(sender, value, buffers), buffers]
 
 # Convert array of meta data from renderer into array of real values.
 unwrapArgs = (sender, args) ->
@@ -75,11 +81,11 @@ unwrapArgs = (sender, args) ->
 callFunction = (event, func, caller, args) ->
   if v8Util.getHiddenValue(func, 'asynchronous') and typeof args[args.length - 1] isnt 'function'
     args.push (ret) ->
-      event.returnValue = valueToMeta event.sender, ret
+      event.returnValue = toReturnValue event.sender, ret
     func.apply caller, args
   else
     ret = func.apply caller, args
-    event.returnValue = valueToMeta event.sender, ret
+    event.returnValue = toReturnValue event.sender, ret
 
 # Send by BrowserWindow when its render view is deleted.
 process.on 'ATOM_BROWSER_RELEASE_RENDER_VIEW', (id) ->
@@ -87,13 +93,13 @@ process.on 'ATOM_BROWSER_RELEASE_RENDER_VIEW', (id) ->
 
 ipc.on 'ATOM_BROWSER_REQUIRE', (event, module) ->
   try
-    event.returnValue = valueToMeta event.sender, process.mainModule.require(module)
+    event.returnValue = toReturnValue event.sender, process.mainModule.require(module)
   catch e
     event.returnValue = errorToMeta e
 
 ipc.on 'ATOM_BROWSER_GLOBAL', (event, name) ->
   try
-    event.returnValue = valueToMeta event.sender, global[name]
+    event.returnValue = toReturnValue event.sender, global[name]
   catch e
     event.returnValue = errorToMeta e
 
@@ -106,12 +112,12 @@ ipc.on 'ATOM_BROWSER_CURRENT_WINDOW', (event, guestInstanceId) ->
     else
       window = BrowserWindow.fromWebContents event.sender
       window = BrowserWindow.fromDevToolsWebContents event.sender unless window?
-    event.returnValue = valueToMeta event.sender, window
+    event.returnValue = toReturnValue event.sender, window
   catch e
     event.returnValue = errorToMeta e
 
 ipc.on 'ATOM_BROWSER_CURRENT_WEB_CONTENTS', (event) ->
-  event.returnValue = valueToMeta event.sender, event.sender
+  event.returnValue = toReturnValue event.sender, event.sender
 
 ipc.on 'ATOM_BROWSER_CONSTRUCTOR', (event, id, args) ->
   try
@@ -120,7 +126,7 @@ ipc.on 'ATOM_BROWSER_CONSTRUCTOR', (event, id, args) ->
     # Call new with array of arguments.
     # http://stackoverflow.com/questions/1606797/use-of-apply-with-new-operator-is-this-possible
     obj = new (Function::bind.apply(constructor, [null].concat(args)))
-    event.returnValue = valueToMeta event.sender, obj
+    event.returnValue = toReturnValue event.sender, obj
   catch e
     event.returnValue = errorToMeta e
 
@@ -138,7 +144,7 @@ ipc.on 'ATOM_BROWSER_MEMBER_CONSTRUCTOR', (event, id, method, args) ->
     constructor = objectsRegistry.get(id)[method]
     # Call new with array of arguments.
     obj = new (Function::bind.apply(constructor, [null].concat(args)))
-    event.returnValue = valueToMeta event.sender, obj
+    event.returnValue = toReturnValue event.sender, obj
   catch e
     event.returnValue = errorToMeta e
 
@@ -154,14 +160,14 @@ ipc.on 'ATOM_BROWSER_MEMBER_SET', (event, id, name, value) ->
   try
     obj = objectsRegistry.get id
     obj[name] = value
-    event.returnValue = null
+    event.returnValue = toReturnValue event.sender, null
   catch e
     event.returnValue = errorToMeta e
 
 ipc.on 'ATOM_BROWSER_MEMBER_GET', (event, id, name) ->
   try
     obj = objectsRegistry.get id
-    event.returnValue = valueToMeta event.sender, obj[name]
+    event.returnValue = toReturnValue event.sender, obj[name]
   catch e
     event.returnValue = errorToMeta e
 
@@ -171,6 +177,6 @@ ipc.on 'ATOM_BROWSER_DEREFERENCE', (event, storeId) ->
 ipc.on 'ATOM_BROWSER_GUEST_WEB_CONTENTS', (event, guestInstanceId) ->
   try
     guestViewManager = require './guest-view-manager'
-    event.returnValue = valueToMeta event.sender, guestViewManager.getGuest(guestInstanceId)
+    event.returnValue = toReturnValue event.sender, guestViewManager.getGuest(guestInstanceId)
   catch e
     event.returnValue = errorToMeta e

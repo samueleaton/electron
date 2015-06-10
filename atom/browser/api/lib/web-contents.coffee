@@ -54,7 +54,9 @@ wrapWebContents = (webContents) ->
     ipc.emit channel, event, args...
   webContents.on 'ipc-message-sync', (event, packed) ->
     [channel, args...] = packed
-    Object.defineProperty event, 'returnValue', set: (value) -> event.sendReply JSON.stringify(value)
+    Object.defineProperty event, 'returnValue', set: (value) ->
+      [value, buffers] = value if Array.isArray value
+      @sendReply JSON.stringify(value), buffers
     Object.defineProperty event, 'sender', value: webContents
     ipc.emit channel, event, args...
 

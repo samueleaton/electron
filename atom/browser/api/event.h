@@ -15,6 +15,8 @@ class Message;
 
 namespace mate {
 
+class Arguments;
+
 class Event : public Wrappable,
               public content::WebContentsObserver {
  public:
@@ -26,8 +28,8 @@ class Event : public Wrappable,
   // event.PreventDefault().
   void PreventDefault(v8::Isolate* isolate);
 
-  // event.sendReply(json), used for replying synchronous message.
-  bool SendReply(const base::string16& json);
+  // event.sendReply(json[, buffers]), used for replying synchronous message.
+  bool SendReply(const base::string16& json, mate::Arguments* args);
 
  protected:
   Event();

@@ -26,11 +26,11 @@ wrapArgs = (args) ->
   Array::slice.call(args).map valueToMeta
 
 # Convert meta data from browser into real value.
-metaToValue = (meta) ->
+metaToValue = (meta, buffers) ->
   switch meta.type
     when 'value' then meta.value
     when 'array' then (metaToValue(el) for el in meta.members)
-    when 'buffer' then new Buffer(meta.value)
+    when 'buffer' then buffers[meta.index]
     when 'error'
       throw new Error("#{meta.message}\n#{meta.stack}")
     else
@@ -41,16 +41,16 @@ metaToValue = (meta) ->
           constructor: ->
             if @constructor == RemoteFunction
               # Constructor call.
-              obj = ipc.sendSync 'ATOM_BROWSER_CONSTRUCTOR', meta.id, wrapArgs(arguments)
+              ret = ipc.sendSyncFull 'ATOM_BROWSER_CONSTRUCTOR', meta.id, wrapArgs(arguments)
 
               # Returning object in constructor will replace constructed object
               # with the returned object.
               # http://stackoverflow.com/questions/1978049/what-values-can-a-constructor-return-to-avoid-returning-this
-              return metaToValue obj
+              return retToValue ret
             else
               # Function call.
-              ret = ipc.sendSync 'ATOM_BROWSER_FUNCTION_CALL', meta.id, wrapArgs(arguments)
-              return metaToValue ret
+              ret = ipc.sendSyncFull 'ATOM_BROWSER_FUNCTION_CALL', meta.id, wrapArgs(arguments)
+              return retToValue ret
       else
         ret = v8Util.createObjectWithName meta.name
 
@@ -63,25 +63,25 @@ metaToValue = (meta) ->
               constructor: ->
                 if @constructor is RemoteMemberFunction
                   # Constructor call.
-                  obj = ipc.sendSync 'ATOM_BROWSER_MEMBER_CONSTRUCTOR', meta.id, member.name, wrapArgs(arguments)
-                  return metaToValue obj
+                  ret = ipc.sendSyncFull 'ATOM_BROWSER_MEMBER_CONSTRUCTOR', meta.id, member.name, wrapArgs(arguments)
+                  return retToValue ret
                 else
                   # Call member function.
-                  ret = ipc.sendSync 'ATOM_BROWSER_MEMBER_CALL', meta.id, member.name, wrapArgs(arguments)
-                  return metaToValue ret
+                  ret = ipc.sendSyncFull 'ATOM_BROWSER_MEMBER_CALL', meta.id, member.name, wrapArgs(arguments)
+                  return retToValue ret
           else
             Object.defineProperty ret, member.name,
               enumerable: true,
               configurable: false,
               set: (value) ->
                 # Set member data.
-                ipc.sendSync 'ATOM_BROWSER_MEMBER_SET', meta.id, member.name, value
+                ipc.sendSyncFull 'ATOM_BROWSER_MEMBER_SET', meta.id, member.name, value
                 value
 
               get: ->
                 # Get member data.
-                ret = ipc.sendSync 'ATOM_BROWSER_MEMBER_GET', meta.id, member.name
-                metaToValue ret
+                ret = ipc.sendSyncFull 'ATOM_BROWSER_MEMBER_GET', meta.id, member.name
+                retToValue ret
 
       # Track delegate object's life time, and tell the browser to clean up
       # when the object is GCed.
@@ -92,6 +92,10 @@ metaToValue = (meta) ->
       v8Util.setHiddenValue ret, 'atomId', meta.id
 
       ret
+
+# Convert return value of sendSyncFull to real value.
+retToValue = (ret) ->
+  metaToValue ret.value, ret.buffers
 
 # Browser calls a callback in renderer.
 ipc.on 'ATOM_RENDERER_CALLBACK', (id, args) ->
@@ -108,27 +112,27 @@ moduleCache = {}
 exports.require = (module) ->
   return moduleCache[module] if moduleCache[module]?
 
-  meta = ipc.sendSync 'ATOM_BROWSER_REQUIRE', module
-  moduleCache[module] = metaToValue meta
+  ret = ipc.sendSyncFull 'ATOM_BROWSER_REQUIRE', module
+  moduleCache[module] = retToValue ret
 
 # Get current BrowserWindow object.
 windowCache = null
 exports.getCurrentWindow = ->
   return windowCache if windowCache?
-  meta = ipc.sendSync 'ATOM_BROWSER_CURRENT_WINDOW', process.guestInstanceId
-  windowCache = metaToValue meta
+  ret = ipc.sendSyncFull 'ATOM_BROWSER_CURRENT_WINDOW', process.guestInstanceId
+  windowCache = retToValue ret
 
 # Get current WebContents object.
 webContentsCache = null
 exports.getCurrentWebContents = ->
   return webContentsCache if webContentsCache?
-  meta = ipc.sendSync 'ATOM_BROWSER_CURRENT_WEB_CONTENTS'
-  webContentsCache = metaToValue meta
+  ret = ipc.sendSyncFull 'ATOM_BROWSER_CURRENT_WEB_CONTENTS'
+  webContentsCache = retToValue ret
 
 # Get a global object in browser.
 exports.getGlobal = (name) ->
-  meta = ipc.sendSync 'ATOM_BROWSER_GLOBAL', name
-  metaToValue meta
+  meta = ipc.sendSyncFull 'ATOM_BROWSER_GLOBAL', name
+  retToValue meta
 
 # Get the process object in browser.
 processCache = null
@@ -144,5 +148,5 @@ exports.createFunctionWithReturnValue = (returnValue) ->
 
 # Get the guest WebContents from guestInstanceId.
 exports.getGuestWebContents = (guestInstanceId) ->
-  meta = ipc.sendSync 'ATOM_BROWSER_GUEST_WEB_CONTENTS', guestInstanceId
-  metaToValue meta
+  ret = ipc.sendSyncFull 'ATOM_BROWSER_GUEST_WEB_CONTENTS', guestInstanceId
+  retToValue ret

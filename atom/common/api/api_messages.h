@@ -4,8 +4,8 @@
 
 // Multiply-included file, no traditional include guard.
 
+#include "atom/common/api/sync_message_reply.h"
 #include "atom/common/draggable_region.h"
-#include "base/strings/string16.h"
 #include "base/values.h"
 #include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_macros.h"
@@ -21,6 +21,12 @@ IPC_STRUCT_TRAITS_BEGIN(atom::DraggableRegion)
   IPC_STRUCT_TRAITS_MEMBER(bounds)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(SyncMessageReply)
+  IPC_STRUCT_TRAITS_MEMBER(json)
+  IPC_STRUCT_TRAITS_MEMBER(handles)
+  IPC_STRUCT_TRAITS_MEMBER(sizes)
+IPC_STRUCT_TRAITS_END()
+
 IPC_MESSAGE_ROUTED2(AtomViewHostMsg_Message,
                     base::string16 /* channel */,
                     base::ListValue /* arguments */)
@@ -28,7 +34,7 @@ IPC_MESSAGE_ROUTED2(AtomViewHostMsg_Message,
 IPC_SYNC_MESSAGE_ROUTED2_1(AtomViewHostMsg_Message_Sync,
                            base::string16 /* channel */,
                            base::ListValue /* arguments */,
-                           base::string16 /* result (in JSON) */)
+                           SyncMessageReply /* result */)
 
 IPC_MESSAGE_ROUTED2(AtomViewMsg_Message,
                     base::string16 /* channel */,
